@@ -1,150 +1,200 @@
 import java.io.*;
+import java.nio.file.*;
+import java.security.*;
 import java.util.*;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 public class MyDedup {
 
-    private static final int CONTAINER_SIZE = 1 * 1024 * 1024;
+    // Metadata and statistics
+    private static Map<String, byte[]> fingerprintIndex = new HashMap<>();
+    private static Map<String, List<String>> fileRecipes = new HashMap<>();
+    private static int totalFiles = 0, totalChunks = 0, uniqueChunks = 0, totalContainers = 0;
+    private static long totalBytes = 0, uniqueBytes = 0;
 
+    private static final int CONTAINER_SIZE = 1 * 1024 * 1024; // 1 MiB
 
-    public static void upload(){
+    public static void main(String[] args) throws Exception {
 
-    }
-
-    public static void delete(){
-
-    }
-
-    public static List<Integer> computeBoundaries(byte[] input, int m, int d, int q, int max) {
-
-        List<Integer> pList = new ArrayList<>();
-        List<Integer> boundaries = new ArrayList<>();
-
-        boundaries.add(0);
-
-        int mark = q-1;
-
-        int prev = 0;
-
-
-        for (int s = 0, count = 0; s < input.length; s++, count++) {
-
-            if(count == max){
-                boundaries.add(s);
-                count = -m;
-            }
-            if (s+m > input.length-1){
-                break;
-            }
-            if (s==0){
-                int sum = 0;
-                for (int i = 0; i < m; i++){
-                    sum += input[i] * (int) Math.pow(d,m-i-1);
-                }
-                prev = sum % q;
-                pList.add(sum % q);
-            }
-            else {
-                int temp = Math.floorMod(d * (prev - (int) Math.pow(d, m  - 1) * input[s])+ input[s+m], q);
-
-                pList.add(temp);
-                prev = temp;
-
-            }
-            // If the prev is equal to mark and our count can't less than zero to fulfill min-size
-            if ((prev & mark) == mark && count >= 0) {
-                boundaries.add(s);
-            }
-        }
-
-
-        return boundaries;
-    }
-
-    private static void splitFile(byte[] data, List<Integer> boundaries) throws IOException {
-        for (int i = 0; i < boundaries.size() - 1; i++) {
-            int start = boundaries.get(i);
-            int end = boundaries.get(i + 1);
-            byte[] segment = Arrays.copyOfRange(data, start, end);
-
-            File outputFile = new File("segment_" + i + ".bin");
-            try (FileOutputStream outputStream = new FileOutputStream(outputFile)) {
-                outputStream.write(segment);
-                System.out.println("Successfully wrote segment " + i + " to " + outputFile.getPath());
-            } catch (IOException e) {
-                System.err.println("Error writing segment " + i + ": " + e.getMessage());
-            }
-        }
-    }
-
-
-
-    public static void main(String[] args) throws IOException, NoSuchAlgorithmException {
-
-
-        String command = args[0];
-
-        if ((!command.equals("download") ) && (!command.equals("upload"))) {
-            System.out.println("Invalid command. Please use 'download' or 'upload'.");
+        if (args.length < 5) {
+            System.out.println("Usage: java MyDedup <upload/download><min_chunk> <avg_chunk> <max_chunk>  <file_path> ");
             return;
         }
 
+        String operation = args[0];
+        String filePath = args[4];
+        int minChunk = Integer.parseInt(args[1]);
+        int avgChunk = Integer.parseInt(args[2]);
+        int maxChunk = Integer.parseInt(args[3]);
 
-        if (command.equals("download")){
+        // Validate chunk sizes
+        if (!isPowerOfTwo(minChunk) || !isPowerOfTwo(avgChunk) || !isPowerOfTwo(maxChunk)) {
+            throw new IllegalArgumentException("Chunk sizes must be powers of 2.");
+        }
+
+        // Load metadata
+        loadMetadata();
+
+        if (operation.equals("upload")) {
+            upload(filePath, minChunk, avgChunk, maxChunk);
+        } else if (operation.equals("download")) {
             if (args.length < 3) {
                 System.out.println("Usage: java MyDedup download <file_to_download> <local_file_name>");
                 return;
             }
 
+            // TODO: download
 
-            String fileToDownload = args[1];
-            String localFileName = args[2];
-            System.out.println("Downloading file: " + fileToDownload + " to " + localFileName);
-
-        }
-        else if(command.equals("upload")){
-
-            if (args.length < 5) {
-                System.out.println("Usage: java MyDedup upload <min_chunk> <avg_chunk> <max_chunk> <file_to_upload>");
-                return;
-            }
-
-            String minChunk = args[1];
-            String avgChunk = args[2];
-            String maxChunk = args[3];;
-
-            int d = 257;
-
-            File fileToUpload = new File(args[4]);
-            FileInputStream file_to_upload = new FileInputStream(fileToUpload);
-            byte[] data = new byte[(int)fileToUpload.length()];
-
-            int t = file_to_upload.read(data);
-            String temp = String.valueOf(file_to_upload.read(data));
-            List<Integer> computeBoundaries = computeBoundaries(data,2,d,512,10);
-            splitFile(data, computeBoundaries);
-            System.out.print('[');
-            for (int i = 0; i < computeBoundaries.size(); i++) {
-                System.out.print(computeBoundaries.get(i));
-                System.out.print(',');
-            }
-            System.out.print(']');
-            file_to_upload.close();
-
-
-            System.out.println(' ');
-
-
-            System.out.println("Uploading file: " + fileToUpload);
-            System.out.println("Minimum Chunk Size: " + minChunk);
-            System.out.println("Average Chunk Size: " + avgChunk);
-            System.out.println("Maximum Chunk Size: " + maxChunk);
-
+        } else {
+            System.out.println("Invalid operation. Use 'upload' or 'download'.");
         }
 
+        // Save metadata
+        saveMetadata();
+    }
+
+    private static void upload(String filePath, int minChunk, int avgChunk, int maxChunk) throws Exception {
+        File file = new File(filePath);
+
+        if (!file.exists()) {
+            throw new FileNotFoundException("File not found: " + filePath);
+        }
+
+        byte[] fileData = Files.readAllBytes(file.toPath());
+
+        List<String> fileChunks = new ArrayList<>();
+        ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
+
+        int start = 0;
+        while (start < fileData.length) {
+            int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
+            byte[] chunk = Arrays.copyOfRange(fileData, start, start + chunkSize);
+            String fingerprint = getMD5(chunk);
+
+            // Deduplication: Add only unique chunks
+            if (!fingerprintIndex.containsKey(fingerprint)) {
+                fingerprintIndex.put(fingerprint, chunk);
+                uniqueChunks++;
+                uniqueBytes += chunk.length;
+
+                // Add to container
+                if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
+                    flushContainer(containerBuffer);
+                }
+                containerBuffer.write(chunk);
+            }
+
+            fileChunks.add(fingerprint);
+            totalChunks++;
+            totalBytes += chunk.length;
+            start += chunkSize;
+        }
+
+        // Flush remaining chunks to a container
+        if (containerBuffer.size() > 0) {
+            flushContainer(containerBuffer);
+        }
+
+        // Update metadata
+        fileRecipes.put(filePath, fileChunks);
+        totalFiles++;
+
+        // Print statistics
+        printStatistics();
+    }
+
+    private static void download(String filePath) throws Exception {
+        List<String> fileChunks = fileRecipes.get(filePath);
+        if (fileChunks == null) {
+            throw new FileNotFoundException("File not found in metadata: " + filePath);
+        }
+
+        try (FileOutputStream fos = new FileOutputStream(filePath)) {
+            for (String fingerprint : fileChunks) {
+                fos.write(fingerprintIndex.get(fingerprint));
+            }
+        }
+
+        System.out.println("File downloaded successfully: " + filePath);
+    }
+
+    private static int findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk) {
+
+        int end =  Math.min(start + minChunk, data.length);; // Limit the chunk size to `maxChunk`
+        int anchorMask = avgChunk - 1; // Anchor point mask
+
+        int d = 257; // Multiplier for Rabin fingerprint
+        int q = avgChunk; // A large prime modulus to avoid overflow
+        int m = minChunk;
+        int p = 0;
+        for (int s = start; s - start < maxChunk; s++) {
+
+            if (s+m > data.length-1){
+                break;
+            }
+
+            if (s == start){
+                int sum = 0;
+                for (int i = 0; i < m; i++){
+                    sum += data[s+i] * (int) Math.pow(d,m-i-1);
+                }
+                p = sum % q;
+
+            } else {
+                p = Math.floorMod(d * (p - (int) Math.pow(d, m  - 1) * data[s])+ data[s+m], q);
+            }
+
+            if ((p & anchorMask) == anchorMask) {
+                end = s + m;
+                break;
+            }
+        }
 
 
-        System.out.println("Download complete.");
+        return end - start;
+    }
+    private static int getRabinFingerprint(byte[] data, int start, int end) {
+        int fingerprint = 0;
+        for (int i = start; i < end; i++) {
+            fingerprint = (fingerprint * 257 + data[i]) & 0x7FFFFFFF;
+        }
+        return fingerprint;
+    }
+
+    private static String getMD5(byte[] data) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("MD5");
+        byte[] hash = md.digest(data);
+        StringBuilder sb = new StringBuilder();
+        for (byte b : hash) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    private static void flushContainer(ByteArrayOutputStream containerBuffer) throws IOException {
+        totalContainers++;
+        containerBuffer.reset();
+    }
+
+    private static boolean isPowerOfTwo(int n) {
+        return (n > 0) && ((n & (n - 1)) == 0);
+    }
+
+    private static void loadMetadata() {
+        // Load metadata from mydedup.index (if exists)
+    }
+
+    private static void saveMetadata() {
+        // Save metadata to mydedup.index
+    }
+
+    private static void printStatistics() {
+        double deduplicationRatio = totalBytes / (double) uniqueBytes;
+        System.out.printf("Total files: %d\n", totalFiles);
+        System.out.printf("Total pre-deduplicated chunks: %d\n", totalChunks);
+        System.out.printf("Total unique chunks: %d\n", uniqueChunks);
+        System.out.printf("Total bytes (pre-deduplicated): %d\n", totalBytes);
+        System.out.printf("Total bytes (unique): %d\n", uniqueBytes);
+        System.out.printf("Total containers: %d\n", totalContainers);
+        System.out.printf("Deduplication ratio: %.2f\n", deduplicationRatio);
     }
 }
