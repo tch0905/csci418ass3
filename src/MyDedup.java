@@ -15,32 +15,38 @@ public class MyDedup {
 
     public static void main(String[] args) throws Exception {
 
-        if (args.length < 5) {
-            System.out.println("Usage: java MyDedup <upload/download><min_chunk> <avg_chunk> <max_chunk>  <file_path> ");
-            return;
-        }
-
         String operation = args[0];
-        String filePath = args[4];
-        int minChunk = Integer.parseInt(args[1]);
-        int avgChunk = Integer.parseInt(args[2]);
-        int maxChunk = Integer.parseInt(args[3]);
 
-        // Validate chunk sizes
-        if (!isPowerOfTwo(minChunk) || !isPowerOfTwo(avgChunk) || !isPowerOfTwo(maxChunk)) {
-            throw new IllegalArgumentException("Chunk sizes must be powers of 2.");
-        }
-
-        // Load metadata
-        loadMetadata();
 
         if (operation.equals("upload")) {
+            String filePath = args[4];
+            int minChunk = Integer.parseInt(args[1]);
+            int avgChunk = Integer.parseInt(args[2]);
+            int maxChunk = Integer.parseInt(args[3]);
+
+            // Validate chunk sizes
+            if (!isPowerOfTwo(minChunk) || !isPowerOfTwo(avgChunk) || !isPowerOfTwo(maxChunk)) {
+                throw new IllegalArgumentException("Chunk sizes must be powers of 2.");
+            }
+
+
+            if (args.length < 5) {
+                System.out.println("Usage: java MyDedup <upload/download><min_chunk> <avg_chunk> <max_chunk>  <file_path> ");
+                return;
+            }
+
+            loadMetadata();
+
             upload(filePath, minChunk, avgChunk, maxChunk);
         } else if (operation.equals("download")) {
             if (args.length < 3) {
                 System.out.println("Usage: java MyDedup download <file_to_download> <local_file_name>");
                 return;
+
             }
+
+            // load the data from the index
+            loadMetadata();
 
             // TODO: download
 
@@ -190,7 +196,7 @@ public class MyDedup {
     private static void loadMetadata() throws IOException {
         Path metadataPath = Paths.get("./data/mydedup.index");
 
-        // Check if the file exists before attempting to read
+        // Check if the metadata file exists before attempting to read
         if (Files.exists(metadataPath)) {
             try (BufferedReader reader = Files.newBufferedReader(metadataPath)) {
                 String line;
@@ -204,13 +210,36 @@ public class MyDedup {
                         fingerprintIndex.put(fingerprint, chunkSize);
                     }
                 }
+                System.out.println("Metadata file loaded from: " + metadataPath);
             } catch (NumberFormatException e) {
                 System.err.println("Error parsing chunk size from metadata: " + e.getMessage());
             }
         } else {
             System.out.println("Metadata file does not exist: " + metadataPath);
         }
-        System.out.println("Metadata file loaded from: " + metadataPath);
+
+        // Update totalContainers by scanning the ./data/ directory
+        updateContainerCount();
+    }
+    private static void updateContainerCount() throws IOException {
+        Path dataDir = Paths.get("./data/");
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataDir, "container_*.bin")) {
+            int maxContainerNum = 0;
+            for (Path entry : stream) {
+                String fileName = entry.getFileName().toString();
+                // Extract the number from the filename
+                String numberPart = fileName.replace("container_", "").replace(".bin", "");
+                try {
+                    int containerNum = Integer.parseInt(numberPart);
+                    maxContainerNum = Math.max(maxContainerNum, containerNum);
+                } catch (NumberFormatException e) {
+                    System.err.println("Error parsing container number from file: " + fileName);
+                }
+            }
+            totalContainers = maxContainerNum+1; // Update the total container count
+        } catch (IOException e) {
+            System.err.println("Error reading the data directory: " + e.getMessage());
+        }
     }
 
     private static void saveMetadata() throws IOException {
