@@ -6,7 +6,7 @@ import java.util.*;
 public class MyDedup {
 
     // Metadata and statistics
-    private static Map<String, byte[]> fingerprintIndex = new HashMap<>();
+    private static Map<String, Integer> fingerprintIndex = new HashMap<>();
     private static Map<String, List<String>> fileRecipes = new HashMap<>();
     private static int totalFiles = 0, totalChunks = 0, uniqueChunks = 0, totalContainers = 0;
     private static long totalBytes = 0, uniqueBytes = 0;
@@ -72,7 +72,7 @@ public class MyDedup {
 
             // Deduplication: Add only unique chunks
             if (!fingerprintIndex.containsKey(fingerprint)) {
-                fingerprintIndex.put(fingerprint, chunk);
+                fingerprintIndex.put(fingerprint, chunkSize); // Store only the fingerprint and chunk size
                 uniqueChunks++;
                 uniqueBytes += chunk.length;
 
@@ -152,13 +152,7 @@ public class MyDedup {
 
         return end - start;
     }
-    private static int getRabinFingerprint(byte[] data, int start, int end) {
-        int fingerprint = 0;
-        for (int i = start; i < end; i++) {
-            fingerprint = (fingerprint * 257 + data[i]) & 0x7FFFFFFF;
-        }
-        return fingerprint;
-    }
+
 
     private static String getMD5(byte[] data) throws Exception {
         MessageDigest md = MessageDigest.getInstance("MD5");
@@ -171,20 +165,68 @@ public class MyDedup {
     }
 
     private static void flushContainer(ByteArrayOutputStream containerBuffer) throws IOException {
+        // Save the container contents to a binary file
+        saveContainer(containerBuffer);
+
+        // Reset the container buffer for future chunks
         totalContainers++;
         containerBuffer.reset();
+    }
+
+    private static void saveContainer(ByteArrayOutputStream containerBuffer) throws IOException {
+        // Create a unique filename for each container if needed
+        String filename = String.format("./data/container_%d.bin", totalContainers);
+        Path outputPath = Paths.get(filename);
+        Files.createDirectories(outputPath.getParent()); // Create directory if it doesn't exist
+        try (OutputStream outputStream = Files.newOutputStream(outputPath)) {
+            containerBuffer.writeTo(outputStream);
+        }
     }
 
     private static boolean isPowerOfTwo(int n) {
         return (n > 0) && ((n & (n - 1)) == 0);
     }
 
-    private static void loadMetadata() {
-        // Load metadata from mydedup.index (if exists)
+    private static void loadMetadata() throws IOException {
+        Path metadataPath = Paths.get("./data/mydedup.index");
+
+        // Check if the file exists before attempting to read
+        if (Files.exists(metadataPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(metadataPath)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(",");
+                    if (parts.length == 2) {
+                        String fingerprint = parts[0];
+                        int chunkSize = Integer.parseInt(parts[1]);
+
+                        // Store only the fingerprint and its size
+                        fingerprintIndex.put(fingerprint, chunkSize);
+                    }
+                }
+            } catch (NumberFormatException e) {
+                System.err.println("Error parsing chunk size from metadata: " + e.getMessage());
+            }
+        } else {
+            System.out.println("Metadata file does not exist: " + metadataPath);
+        }
+        System.out.println("Metadata file loaded from: " + metadataPath);
     }
 
-    private static void saveMetadata() {
-        // Save metadata to mydedup.index
+    private static void saveMetadata() throws IOException {
+        // Define the file path for the metadata
+        Path metadataPath = Paths.get("./data/mydedup.index");
+        Files.createDirectories(metadataPath.getParent()); // Create directory if it doesn't exist
+
+        // Use a try-with-resources statement to ensure the writer is closed properly
+        try (BufferedWriter writer = Files.newBufferedWriter(metadataPath)) {
+            for (Map.Entry<String, Integer> entry : fingerprintIndex.entrySet()) {
+                String fingerprint = entry.getKey();
+                int chunkSize = entry.getValue();
+                String metadataLine = String.format("%s,%d%n", fingerprint, chunkSize);
+                writer.write(metadataLine);
+            }
+        }
     }
 
     private static void printStatistics() {
