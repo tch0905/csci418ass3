@@ -8,12 +8,19 @@ class FingerprintInfo {
     int containerNumber;
     int start;
     int offset;
+    int referencingFiles; // New field to track how many files reference this fingerprint
 
     public FingerprintInfo(String fingerprint, int containerNumber, int start, int offset) {
         this.fingerprint = fingerprint;
         this.containerNumber = containerNumber;
         this.start = start;
         this.offset = offset;
+        this.referencingFiles = 0; // Initialize to 0 when created
+    }
+
+    // Method to increment the referencing file count
+    public void incrementReferencingFiles() {
+        this.referencingFiles++;
     }
 }
 
@@ -84,12 +91,13 @@ public class MyDedup {
             throw new FileNotFoundException("File not found: " + filePath);
         }
 
+        Set<String> fileListFingerprints = loadFileListFingerprints();
         byte[] fileData = Files.readAllBytes(file.toPath());
 
+        int start = 0;
+        boolean haveUniqueChunk = false;
         List<String> fileChunks = new ArrayList<>();
         ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
-
-        int start = 0;
 
         while (start < fileData.length) {
             int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
@@ -98,22 +106,37 @@ public class MyDedup {
 
             // Deduplication: Add only unique chunks
             if (!fingerprintIndex.containsKey(fingerprint)) {
+                haveUniqueChunk = true;
                 // Store the fingerprint along with container number, start, and offset
                 fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, totalContainers, start, chunkSize));
                 uniqueChunks++;
                 uniqueBytes += chunk.length;
-
-                // Add to container
-                if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
-                    flushContainer(containerBuffer);
-                }
                 containerBuffer.write(chunk);
             }
+
+            // Add to container
+            if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
+                flushContainer(containerBuffer);
+            }
+
 
             fileChunks.add(fingerprint);
             totalChunks++;
             totalBytes += chunk.length;
             start += chunkSize;
+        }
+
+        // Check if the fileChunks are already in the file list
+        if (!haveUniqueChunk && fileChunks.stream().allMatch(fileListFingerprints::contains)) {
+            System.out.println("The file has already been uploaded; skipping update.");
+            return; // Skip the upload
+        }
+
+        // If any chunk was unique, we need to check if any chunk was duplicated
+        for (String fingerprint : fileChunks) {
+            if (fingerprintIndex.containsKey(fingerprint)) {
+                fingerprintIndex.get(fingerprint).incrementReferencingFiles();
+            }
         }
 
         // Flush remaining chunks to a container
@@ -131,7 +154,6 @@ public class MyDedup {
         // Print statistics
         printStatistics();
     }
-
 
     private static void download(String filePath) throws Exception {
         List<String> fileChunks = fileRecipes.get(filePath);
@@ -218,35 +240,7 @@ public class MyDedup {
         return (n > 0) && ((n & (n - 1)) == 0);
     }
 
-    private static void loadMetadata() throws IOException {
-        Path metadataPath = Paths.get("./data/mydedup.index");
 
-        if (Files.exists(metadataPath)) {
-            try (BufferedReader reader = Files.newBufferedReader(metadataPath)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String[] parts = line.split(",");
-                    if (parts.length == 4) {
-                        String fingerprint = parts[0];
-                        int containerNumber = Integer.parseInt(parts[1]);
-                        int start = Integer.parseInt(parts[2]);
-                        int offset = Integer.parseInt(parts[3]);
-
-                        // Store the fingerprint info
-                        fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, containerNumber, start, offset));
-                    }
-                }
-                System.out.println("Metadata file loaded from: " + metadataPath);
-            } catch (NumberFormatException e) {
-                System.err.println("Error parsing metadata from file: " + e.getMessage());
-            }
-        } else {
-            System.out.println("Metadata file does not exist: " + metadataPath);
-        }
-
-        // Update totalContainers by scanning the ./data/ directory
-        updateContainerCount();
-    }
     private static void updateContainerCount() throws IOException {
         Path dataDir = Paths.get("./data/");
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataDir, "container_*.bin")) {
@@ -274,13 +268,52 @@ public class MyDedup {
         }
     }
 
+    private static void loadMetadata() throws IOException {
+        Path metadataPath = Paths.get("./data/mydedup.index");
+
+        if (Files.exists(metadataPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(metadataPath)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(",");
+                    if (parts.length == 5) { // Expecting 5 parts now
+                        String fingerprint = parts[0];
+                        int containerNumber = Integer.parseInt(parts[1]);
+                        int start = Integer.parseInt(parts[2]);
+                        int offset = Integer.parseInt(parts[3]);
+                        int referencingFiles = Integer.parseInt(parts[4]); // New field
+
+                        // Store the fingerprint info with the referencingFiles count
+                        FingerprintInfo info = new FingerprintInfo(fingerprint, containerNumber, start, offset);
+                        info.referencingFiles = referencingFiles; // Set the referencingFiles count
+                        fingerprintIndex.put(fingerprint, info);
+                    }
+                }
+                System.out.println("Metadata file loaded from: " + metadataPath);
+            } catch (NumberFormatException e) {
+                System.err.println("Error parsing metadata from file: " + e.getMessage());
+            }
+        } else {
+            System.out.println("Metadata file does not exist: " + metadataPath);
+        }
+
+        // Update totalContainers by scanning the ./data/ directory
+        updateContainerCount();
+    }
+
     private static void saveMetadata() throws IOException {
         Path metadataPath = Paths.get("./data/mydedup.index");
         Files.createDirectories(metadataPath.getParent()); // Create directory if it doesn't exist
 
         try (BufferedWriter writer = Files.newBufferedWriter(metadataPath)) {
             for (FingerprintInfo info : fingerprintIndex.values()) {
-                String metadataLine = String.format("%s,%d,%d,%d%n", info.fingerprint, info.containerNumber, info.start, info.offset);
+                // Update the format to include the referencingFiles count
+                String metadataLine = String.format("%s,%d,%d,%d,%d%n",
+                        info.fingerprint,
+                        info.containerNumber,
+                        info.start,
+                        info.offset,
+                        info.referencingFiles); // Include referencingFiles
                 writer.write(metadataLine);
             }
         }
@@ -298,8 +331,8 @@ public class MyDedup {
         }
     }
 
-    private static Set<String> loadExistingFingerprints() throws IOException {
-        Set<String> existingFingerprints = new HashSet<>();
+    private static Set<String> loadFileListFingerprints() throws IOException {
+        Set<String> fileListFingerprints = new HashSet<>();
         Path fileListPath = Paths.get("./data/file_list.index");
 
         if (Files.exists(fileListPath)) {
@@ -308,9 +341,9 @@ public class MyDedup {
                 while ((line = reader.readLine()) != null) {
                     String[] parts = line.split(",");
                     if (parts.length > 1) {
-                        // Skip the fileId, add fingerprints to the set
+                        // Add all fingerprints to the set, skipping the fileId
                         for (int i = 1; i < parts.length; i++) {
-                            existingFingerprints.add(parts[i]);
+                            fileListFingerprints.add(parts[i]);
                         }
                     }
                 }
@@ -318,7 +351,7 @@ public class MyDedup {
                 System.err.println("Error reading file list: " + e.getMessage());
             }
         }
-        return existingFingerprints;
+        return fileListFingerprints;
     }
 
     private static void printStatistics() {
