@@ -120,7 +120,7 @@ public class MyDedup {
         ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
 
         while (start < fileData.length) {
-            System.out.println("Anchor: " + start);
+            // System.out.println("Anchor: " + start);
             int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
             byte[] chunk = Arrays.copyOfRange(fileData, start, start + chunkSize);
             String fingerprint = getMD5(chunk);
