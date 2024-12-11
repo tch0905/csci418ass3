@@ -89,8 +89,8 @@ public class MyDedup {
         List<String> fileChunks = new ArrayList<>();
         ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
 
-
         int start = 0;
+
         while (start < fileData.length) {
             int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
             byte[] chunk = Arrays.copyOfRange(fileData, start, start + chunkSize);
@@ -125,9 +125,13 @@ public class MyDedup {
         fileRecipes.put(filePath, fileChunks);
         totalFiles++;
 
+        // Update the file list
+        updateFileList(fileChunks);
+
         // Print statistics
         printStatistics();
     }
+
 
     private static void download(String filePath) throws Exception {
         List<String> fileChunks = fileRecipes.get(filePath);
@@ -280,6 +284,41 @@ public class MyDedup {
                 writer.write(metadataLine);
             }
         }
+    }
+    private static void updateFileList(List<String> fileChunks) throws IOException {
+        Path fileListPath = Paths.get("./data/file_list.index");
+        Files.createDirectories(fileListPath.getParent()); // Ensure the directory exists
+
+        // Use a try-with-resources statement to ensure the writer is closed properly
+        try (BufferedWriter writer = Files.newBufferedWriter(fileListPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+            int fileId = totalFiles; // Use the current totalFiles count as the fileId
+            // Write the fileId followed by the fingerprints in order
+            String line = String.format("%d,%s%n", fileId, String.join(",", fileChunks));
+            writer.write(line);
+        }
+    }
+
+    private static Set<String> loadExistingFingerprints() throws IOException {
+        Set<String> existingFingerprints = new HashSet<>();
+        Path fileListPath = Paths.get("./data/file_list.index");
+
+        if (Files.exists(fileListPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(fileListPath)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(",");
+                    if (parts.length > 1) {
+                        // Skip the fileId, add fingerprints to the set
+                        for (int i = 1; i < parts.length; i++) {
+                            existingFingerprints.add(parts[i]);
+                        }
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("Error reading file list: " + e.getMessage());
+            }
+        }
+        return existingFingerprints;
     }
 
     private static void printStatistics() {
