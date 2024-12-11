@@ -149,7 +149,7 @@ public class MyDedup {
         totalFiles++;
 
         // Update the file list
-        updateFileList(fileChunks);
+        updateFileList(fileChunks, filePath);
 
         // Print statistics
         printStatistics();
@@ -318,7 +318,7 @@ public class MyDedup {
             }
         }
     }
-    private static void updateFileList(List<String> fileChunks) throws IOException {
+    private static void updateFileList(List<String> fileChunks, String filePath) throws IOException {
         Path fileListPath = Paths.get("./data/file_list.index");
         Files.createDirectories(fileListPath.getParent()); // Ensure the directory exists
 
@@ -326,7 +326,7 @@ public class MyDedup {
         try (BufferedWriter writer = Files.newBufferedWriter(fileListPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
             int fileId = totalFiles; // Use the current totalFiles count as the fileId
             // Write the fileId followed by the fingerprints in order
-            String line = String.format("%d,%s%n", fileId, String.join(",", fileChunks));
+            String line = String.format("%d,%s,%s%n", fileId, filePath, String.join(",", fileChunks));
             writer.write(line);
         }
     }
