@@ -94,6 +94,7 @@ public class MyDedup {
         // Save metadata
         saveMetadata();
         saveStatistics();
+        saveFileRecipes();
     }
 
     private static void upload(String filePath, int minChunk, int avgChunk, int maxChunk) throws Exception {
