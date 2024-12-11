@@ -128,7 +128,7 @@ public class MyDedup {
             if (!fingerprintIndex.containsKey(fingerprint)) {
                 haveUniqueChunk = true;
                 // Store the fingerprint along with container number, start, and offset
-                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, totalContainers, start, chunkSize));
+                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, totalContainers, containerBuffer.size(), chunkSize));
                 uniqueChunks++;
                 uniqueBytes += chunk.length;
                 containerBuffer.write(chunk);
