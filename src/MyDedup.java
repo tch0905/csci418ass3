@@ -37,7 +37,7 @@ public class MyDedup {
     public static void main(String[] args) throws Exception {
 
         if (args.length == 0) {
-            System.out.println("Usage: java MyDedup <upload/download><min_chunk> <avg_chunk> <max_chunk>  <file_path> ");
+            System.out.println("Usage: java MyDedup <upload/download> <min_chunk> <avg_chunk> <max_chunk> <file_path> ");
             return;
         }
 
@@ -57,7 +57,7 @@ public class MyDedup {
 
 
             if (args.length < 5) {
-                System.out.println("Usage: java MyDedup <upload/download><min_chunk> <avg_chunk> <max_chunk>  <file_path> ");
+                System.out.println("Usage: java MyDedup <upload/download> <min_chunk> <avg_chunk> <max_chunk> <file_path> ");
                 return;
             }
 
