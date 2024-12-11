@@ -2,6 +2,7 @@ import java.io.*;
 import java.nio.file.*;
 import java.security.*;
 import java.util.*;
+import java.util.stream.Collectors;
 
 class FingerprintInfo {
     String fingerprint;
@@ -22,6 +23,11 @@ class FingerprintInfo {
     public void incrementReferencingFiles() {
         this.referencingFiles++;
     }
+
+    public void decrementReferencingFiles(){
+        this.referencingFiles--;
+    }
+
 }
 
 public class MyDedup {
@@ -29,6 +35,8 @@ public class MyDedup {
     // Metadata and statistics
     private static Map<String, FingerprintInfo> fingerprintIndex = new HashMap<>();
     private static Map<String, List<String>> fileRecipes = new HashMap<>();
+    private static Map<Integer, Integer> containerReferences = new HashMap<>();
+    private static Set<Integer> emptyContainers = new HashSet<>();
     private static int totalFiles = 0, totalChunks = 0, uniqueChunks = 0, totalContainers = 0;
     private static long totalBytes = 0, uniqueBytes = 0;
 
@@ -85,7 +93,8 @@ public class MyDedup {
                 return;
             }
 
-            // delete(args[1]);
+            String filePath = args[1];
+            delete(filePath);
         } 
         else {
             System.out.println("Invalid operation. Use 'upload' or 'download' or 'delete'.");
@@ -111,8 +120,20 @@ public class MyDedup {
             return; // Skip the upload
         }
 
-        Set<String> fileListFingerprints = loadFileListFingerprints();
         byte[] fileData = Files.readAllBytes(file.toPath());
+
+        Integer containerNumber = null;
+
+        // Use an empty container if available
+        if (!emptyContainers.isEmpty()) {
+            containerNumber = emptyContainers.iterator().next(); // Get an empty container number
+            emptyContainers.remove(containerNumber); // Remove it from the set of empty containers
+        } else {
+            // Create a new container number based on the total count
+            containerNumber = totalContainers;
+        }
+
+
 
         int start = 0;
         boolean haveUniqueChunk = false;
@@ -128,7 +149,7 @@ public class MyDedup {
             if (!fingerprintIndex.containsKey(fingerprint)) {
                 haveUniqueChunk = true;
                 // Store the fingerprint along with container number, start, and offset
-                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, totalContainers, containerBuffer.size(), chunkSize));
+                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, containerNumber, containerBuffer.size(), chunkSize));
                 uniqueChunks++;
                 uniqueBytes += chunk.length;
                 containerBuffer.write(chunk);
@@ -136,7 +157,7 @@ public class MyDedup {
 
             // Add to container
             if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
-                flushContainer(containerBuffer);
+                flushContainer(containerBuffer, containerNumber);
             }
 
 
@@ -162,7 +183,7 @@ public class MyDedup {
 
         // Flush remaining chunks to a container
         if (containerBuffer.size() > 0) {
-            flushContainer(containerBuffer);
+            flushContainer(containerBuffer, containerNumber);
         }
 
         // Update metadata
@@ -215,6 +236,68 @@ public class MyDedup {
         System.out.println("File downloaded successfully: " + filePath);
     }
 
+
+    private static void delete(String filePath) throws Exception {
+        List<String> fileChunks = fileRecipes.get(filePath);
+        System.out.println("File Chunks: " + fileChunks);
+
+        if (fileChunks == null) {
+            throw new FileNotFoundException("File not found in metadata: " + filePath);
+        }
+
+        Set<Integer> relatedContainers = new HashSet<>();
+        long fileTotalBytes = 0; // Track total bytes for this file
+
+        for (String fingerprint : fileChunks) {
+            FingerprintInfo info = fingerprintIndex.get(fingerprint);
+            if (info != null) {
+                // Add the container number to the related containers set
+                relatedContainers.add(info.containerNumber);
+
+                // Track the total bytes for the file being deleted
+                fileTotalBytes += info.offset; // Assuming offset represents the size of the chunk
+
+                info.decrementReferencingFiles();
+                containerReferences.put(info.containerNumber, containerReferences.get(info.containerNumber) - 1);
+
+                // If no more files reference this fingerprint, remove it from the index
+                if (info.referencingFiles == 0) {
+                    fingerprintIndex.remove(fingerprint);
+                    uniqueChunks--; // Decrement unique chunks count
+                    uniqueBytes -= info.offset; // Decrement unique bytes count
+                }
+            }
+        }
+
+        // Remove the file entry from fileRecipes
+        fileRecipes.remove(filePath);
+
+        // Decrement totalFiles count
+        totalFiles--;
+
+        // Update total bytes and total chunks
+        totalBytes -= fileTotalBytes; // Subtract the total bytes of the deleted file
+        totalChunks -= fileChunks.size(); // Subtract the number of chunks associated with the file
+
+        // Check if any containers have no more referencing files and handle deletion if needed
+        for (Integer container : relatedContainers) {
+            if (containerReferences.get(container) <= 0) {
+                // Logic to delete the container file
+                String containerFilePath = String.format("./data/container_%d.bin", container);
+                File containerFile = new File(containerFilePath);
+                if (containerFile.delete()) {
+                    System.out.println("Successfully deleted physical container: " + containerFilePath);
+                } else {
+                    System.err.println("Failed to delete physical container: " + containerFilePath);
+                }
+                emptyContainers.add(container); // Mark the container as empty
+                totalContainers--; // Decrement total containers count
+            }
+        }
+
+        System.out.println("Successfully deleted file: " + filePath);
+    }
+
     private static int findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk) {
 
         int end =  Math.min(start + minChunk, data.length);; // Limit the chunk size to `maxChunk`
@@ -262,56 +345,58 @@ public class MyDedup {
         return sb.toString();
     }
 
-    private static void flushContainer(ByteArrayOutputStream containerBuffer) throws IOException {
+    private static void flushContainer(ByteArrayOutputStream containerBuffer, Integer containerNumber) throws IOException {
         // Save the container contents to a binary file
-        saveContainer(containerBuffer);
+        saveContainer(containerBuffer, containerNumber);
 
         // Reset the container buffer for future chunks
         totalContainers++;
         containerBuffer.reset();
     }
 
-    private static void saveContainer(ByteArrayOutputStream containerBuffer) throws IOException {
-        // Create a unique filename for each container if needed
-        String filename = String.format("./data/container_%d.bin", totalContainers);
+    private static void saveContainer(ByteArrayOutputStream containerBuffer, Integer containerNumber) throws IOException {
+        // Create the filename for the container
+        String filename = String.format("./data/container_%d.bin", containerNumber);
         Path outputPath = Paths.get(filename);
         Files.createDirectories(outputPath.getParent()); // Create directory if it doesn't exist
+
         try (OutputStream outputStream = Files.newOutputStream(outputPath)) {
             containerBuffer.writeTo(outputStream);
         }
-    }
 
+        System.out.println("Saved container: " + filename);
+    }
     private static boolean isPowerOfTwo(int n) {
         return (n > 0) && ((n & (n - 1)) == 0);
     }
 
 
-    private static void updateContainerCount() throws IOException {
-        Path dataDir = Paths.get("./data/");
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataDir, "container_*.bin")) {
-            int maxContainerNum = 0;
-            boolean hasContainers = false; // Flag to check if any containers are found
-
-            for (Path entry : stream) {
-                hasContainers = true; // At least one container file found
-                String fileName = entry.getFileName().toString();
-                // Extract the number from the filename
-                String numberPart = fileName.replace("container_", "").replace(".bin", "");
-                try {
-                    int containerNum = Integer.parseInt(numberPart);
-                    maxContainerNum = Math.max(maxContainerNum, containerNum);
-                } catch (NumberFormatException e) {
-//                    System.err.println("Error parsing container number from file: " + fileName);
-                }
-            }
-
-            // Update the total container count; if no containers were found, it remains 0
-            totalContainers = hasContainers ? maxContainerNum + 1 : 0;
-        } catch (IOException e) {
-//            System.err.println("Error reading the data directory: " + e.getMessage());
-            totalContainers = 0; // Set to 0 in case of an error
-        }
-    }
+//    private static void updateContainerCount() throws IOException {
+//        Path dataDir = Paths.get("./data/");
+//        try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataDir, "container_*.bin")) {
+//            int maxContainerNum = 0;
+//            boolean hasContainers = false; // Flag to check if any containers are found
+//
+//            for (Path entry : stream) {
+//                hasContainers = true; // At least one container file found
+//                String fileName = entry.getFileName().toString();
+//                // Extract the number from the filename
+//                String numberPart = fileName.replace("container_", "").replace(".bin", "");
+//                try {
+//                    int containerNum = Integer.parseInt(numberPart);
+//                    maxContainerNum = Math.max(maxContainerNum, containerNum);
+//                } catch (NumberFormatException e) {
+////                    System.err.println("Error parsing container number from file: " + fileName);
+//                }
+//            }
+//
+//            // Update the total container count; if no containers were found, it remains 0
+//            totalContainers = hasContainers ? maxContainerNum + 1 : 0;
+//        } catch (IOException e) {
+////            System.err.println("Error reading the data directory: " + e.getMessage());
+//            totalContainers = 0; // Set to 0 in case of an error
+//        }
+//    }
 
     private static void loadMetadata() throws IOException {
         Path metadataPath = Paths.get("./data/mydedup.index");
@@ -332,18 +417,21 @@ public class MyDedup {
                         FingerprintInfo info = new FingerprintInfo(fingerprint, containerNumber, start, offset);
                         info.referencingFiles = referencingFiles; // Set the referencingFiles count
                         fingerprintIndex.put(fingerprint, info);
+
+                        // Update the container references
+                        containerReferences.put(containerNumber, containerReferences.getOrDefault(containerNumber, 0) + referencingFiles);
                     }
                 }
-//                System.out.println("Metadata file loaded from: " + metadataPath);
+                System.out.println("Metadata file loaded from: " + metadataPath);
             } catch (NumberFormatException e) {
-//                System.err.println("Error parsing metadata from file: " + e.getMessage());
+                System.err.println("Error parsing metadata from file: " + e.getMessage());
             }
         } else {
-//            System.out.println("Metadata file does not exist: " + metadataPath);
+            System.out.println("Metadata file does not exist: " + metadataPath);
         }
 
         // Update totalContainers by scanning the ./data/ directory
-        updateContainerCount();
+//        updateContainerCount();
     }
 
     private static void saveMetadata() throws IOException {
@@ -368,14 +456,23 @@ public class MyDedup {
         Path statsPath = Paths.get("./data/stat.index");
         Files.createDirectories(statsPath.getParent()); // Create directory if it doesn't exist
 
+        int emptyContainerCount = emptyContainers.size();
+
+        String emptyContainerList = emptyContainers.stream()
+                .map(String::valueOf)
+                .collect(Collectors.joining(","));
+
         try (BufferedWriter writer = Files.newBufferedWriter(statsPath)) {
-            String statsLine = String.format("%d,%d,%d,%d,%d,%d%n",
+            String statsLine = String.format("%d,%d,%d,%d,%d,%d,%d,%s%n",
                     totalFiles,
                     totalChunks,
                     uniqueChunks,
                     totalContainers,
                     totalBytes,
-                    uniqueBytes);
+                    uniqueBytes,
+                    emptyContainerCount,
+                    emptyContainerList
+            );
             writer.write(statsLine);
         }
     }
@@ -388,22 +485,29 @@ public class MyDedup {
                 String line = reader.readLine();
                 if (line != null) {
                     String[] parts = line.split(",");
-                    if (parts.length == 6) {
-                        totalFiles = Integer.parseInt(parts[0]);
-                        totalChunks = Integer.parseInt(parts[1]);
-                        uniqueChunks = Integer.parseInt(parts[2]);
-                        totalContainers = Integer.parseInt(parts[3]);
-                        totalBytes = Long.parseLong(parts[4]);
-                        uniqueBytes = Long.parseLong(parts[5]);
+                    totalFiles = Integer.parseInt(parts[0]);
+                    totalChunks = Integer.parseInt(parts[1]);
+                    uniqueChunks = Integer.parseInt(parts[2]);
+                    totalContainers = Integer.parseInt(parts[3]);
+                    totalBytes = Long.parseLong(parts[4]);
+                    uniqueBytes = Long.parseLong(parts[5]);
+                    if (parts.length >= 7) {
+
+                        // Load empty containers
+                        int emptyContainerCount = Integer.parseInt(parts[6]); // Read count
+                        for (int k = 0; k<emptyContainerCount; k++){
+                            emptyContainers.add(Integer.parseInt(parts[7+k]));
+                        }
                     }
+                    // System.out.println("Statistics loaded from: " + statsPath);
                 }
-//                System.out.println("Statistics loaded from: " + statsPath);
             } catch (NumberFormatException e) {
-//                System.err.println("Error parsing statistics from file: " + e.getMessage());
+                // System.err.println("Error parsing statistics from file: " + e.getMessage());
             }
         } else {
-//            System.out.println("Statistics file does not exist: " + statsPath);
+            // System.out.println("Statistics file does not exist: " + statsPath);
         }
+
     }
     private static void loadFileRecipes() throws IOException {
         Path fileListPath = Paths.get("./data/file_list.index");
@@ -425,6 +529,7 @@ public class MyDedup {
         } else {
 //            System.out.println("File recipes file does not exist: " + fileListPath);
         }
+
     }
 
     private static void saveFileRecipes() throws IOException {
@@ -442,28 +547,6 @@ public class MyDedup {
         }
     }
 
-    private static Set<String> loadFileListFingerprints() throws IOException {
-        Set<String> fileListFingerprints = new HashSet<>();
-        Path fileListPath = Paths.get("./data/file_list.index");
-
-        if (Files.exists(fileListPath)) {
-            try (BufferedReader reader = Files.newBufferedReader(fileListPath)) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    String[] parts = line.split(",");
-                    if (parts.length > 1) {
-                        // Add all fingerprints to the set, skipping the fileId
-                        for (int i = 1; i < parts.length; i++) {
-                            fileListFingerprints.add(parts[i]);
-                        }
-                    }
-                }
-            } catch (IOException e) {
-//                System.err.println("Error reading file list: " + e.getMessage());
-            }
-        }
-        return fileListFingerprints;
-    }
 
     private static void printStatistics() {
         double deduplicationRatio = totalBytes / (double) uniqueBytes;
