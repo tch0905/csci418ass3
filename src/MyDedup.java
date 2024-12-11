@@ -85,6 +85,7 @@ public class MyDedup {
             }
 
             // load the data from the index
+            loadStatistics();
             loadMetadata();
 
             // delete(args[1]);
@@ -95,6 +96,7 @@ public class MyDedup {
 
         // Save metadata
         saveMetadata();
+        saveStatistics();
     }
 
     private static void upload(String filePath, int minChunk, int avgChunk, int maxChunk) throws Exception {
@@ -330,6 +332,48 @@ public class MyDedup {
                         info.referencingFiles); // Include referencingFiles
                 writer.write(metadataLine);
             }
+        }
+    }
+
+    private static void saveStatistics() throws IOException {
+        Path statsPath = Paths.get("./data/stat.index");
+        Files.createDirectories(statsPath.getParent()); // Create directory if it doesn't exist
+
+        try (BufferedWriter writer = Files.newBufferedWriter(statsPath)) {
+            String statsLine = String.format("%d,%d,%d,%d,%d,%d%n",
+                    totalFiles,
+                    totalChunks,
+                    uniqueChunks,
+                    totalContainers,
+                    totalBytes,
+                    uniqueBytes);
+            writer.write(statsLine);
+        }
+    }
+
+    private static void loadStatistics() throws IOException {
+        Path statsPath = Paths.get("./data/stat.index");
+
+        if (Files.exists(statsPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(statsPath)) {
+                String line = reader.readLine();
+                if (line != null) {
+                    String[] parts = line.split(",");
+                    if (parts.length == 6) {
+                        totalFiles = Integer.parseInt(parts[0]);
+                        totalChunks = Integer.parseInt(parts[1]);
+                        uniqueChunks = Integer.parseInt(parts[2]);
+                        totalContainers = Integer.parseInt(parts[3]);
+                        totalBytes = Long.parseLong(parts[4]);
+                        uniqueBytes = Long.parseLong(parts[5]);
+                    }
+                }
+                System.out.println("Statistics loaded from: " + statsPath);
+            } catch (NumberFormatException e) {
+                System.err.println("Error parsing statistics from file: " + e.getMessage());
+            }
+        } else {
+            System.out.println("Statistics file does not exist: " + statsPath);
         }
     }
     private static void updateFileList(List<String> fileChunks, String filePath) throws IOException {
