@@ -141,6 +141,7 @@ public class MyDedup {
         ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
 
         while (start < fileData.length) {
+            // System.out.println("Anchor: " + start);
             int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
             byte[] chunk = Arrays.copyOfRange(fileData, start, start + chunkSize);
             String fingerprint = getMD5(chunk);
@@ -197,7 +198,7 @@ public class MyDedup {
 
     private static void download(String filePath, String localFilePath) throws Exception {
         List<String> fileChunks = fileRecipes.get(filePath);
-        System.out.println("File Chunks: " + fileChunks);
+        // System.out.println("File Chunks: " + fileChunks);
         if (fileChunks == null) {
             throw new FileNotFoundException("File not found in metadata: " + filePath);
         }
