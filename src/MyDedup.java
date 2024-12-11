@@ -89,6 +89,7 @@ public class MyDedup {
         } 
         else {
             System.out.println("Invalid operation. Use 'upload' or 'download' or 'delete'.");
+            return;
         }
 
         // Save metadata
@@ -168,8 +169,6 @@ public class MyDedup {
         fileRecipes.put(filePath, fileChunks);
         totalFiles++;
 
-        // Update the file list
-        saveFileRecipes();
 
         // Print statistics
         printStatistics();
@@ -277,14 +276,14 @@ public class MyDedup {
                     int containerNum = Integer.parseInt(numberPart);
                     maxContainerNum = Math.max(maxContainerNum, containerNum);
                 } catch (NumberFormatException e) {
-                    System.err.println("Error parsing container number from file: " + fileName);
+//                    System.err.println("Error parsing container number from file: " + fileName);
                 }
             }
 
             // Update the total container count; if no containers were found, it remains 0
             totalContainers = hasContainers ? maxContainerNum + 1 : 0;
         } catch (IOException e) {
-            System.err.println("Error reading the data directory: " + e.getMessage());
+//            System.err.println("Error reading the data directory: " + e.getMessage());
             totalContainers = 0; // Set to 0 in case of an error
         }
     }
@@ -310,12 +309,12 @@ public class MyDedup {
                         fingerprintIndex.put(fingerprint, info);
                     }
                 }
-                System.out.println("Metadata file loaded from: " + metadataPath);
+//                System.out.println("Metadata file loaded from: " + metadataPath);
             } catch (NumberFormatException e) {
-                System.err.println("Error parsing metadata from file: " + e.getMessage());
+//                System.err.println("Error parsing metadata from file: " + e.getMessage());
             }
         } else {
-            System.out.println("Metadata file does not exist: " + metadataPath);
+//            System.out.println("Metadata file does not exist: " + metadataPath);
         }
 
         // Update totalContainers by scanning the ./data/ directory
@@ -373,12 +372,12 @@ public class MyDedup {
                         uniqueBytes = Long.parseLong(parts[5]);
                     }
                 }
-                System.out.println("Statistics loaded from: " + statsPath);
+//                System.out.println("Statistics loaded from: " + statsPath);
             } catch (NumberFormatException e) {
-                System.err.println("Error parsing statistics from file: " + e.getMessage());
+//                System.err.println("Error parsing statistics from file: " + e.getMessage());
             }
         } else {
-            System.out.println("Statistics file does not exist: " + statsPath);
+//            System.out.println("Statistics file does not exist: " + statsPath);
         }
     }
     private static void loadFileRecipes() throws IOException {
@@ -396,10 +395,10 @@ public class MyDedup {
                         fileRecipes.put(filePath, fingerprints);
                     }
                 }
-                System.out.println("File recipes loaded from: " + fileListPath);
+//                System.out.println("File recipes loaded from: " + fileListPath);
             }
         } else {
-            System.out.println("File recipes file does not exist: " + fileListPath);
+//            System.out.println("File recipes file does not exist: " + fileListPath);
         }
     }
 
@@ -435,7 +434,7 @@ public class MyDedup {
                     }
                 }
             } catch (IOException e) {
-                System.err.println("Error reading file list: " + e.getMessage());
+//                System.err.println("Error reading file list: " + e.getMessage());
             }
         }
         return fileListFingerprints;
