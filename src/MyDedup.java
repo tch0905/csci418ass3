@@ -43,6 +43,10 @@ public class MyDedup {
 
         String operation = args[0];
 
+        loadStatistics();
+        loadMetadata();
+        loadFileRecipes();
+
         if (operation.equals("upload")) {
             String filePath = args[4];
             int minChunk = Integer.parseInt(args[1]);
@@ -60,7 +64,6 @@ public class MyDedup {
                 return;
             }
 
-            loadMetadata();
 
             upload(filePath, minChunk, avgChunk, maxChunk);
         } else if (operation.equals("download")) {
@@ -73,8 +76,6 @@ public class MyDedup {
             String localFilePath = args[2];
             System.out.println("Filepath: " + filePath + "," + localFilePath);
 
-            // load the data from the index
-            loadMetadata();
 
             download(filePath, localFilePath);
 
@@ -83,10 +84,6 @@ public class MyDedup {
                 System.out.println("Usage: java MyDedup delete <file_to_delete>");
                 return;
             }
-
-            // load the data from the index
-            loadStatistics();
-            loadMetadata();
 
             // delete(args[1]);
         } 
@@ -104,6 +101,12 @@ public class MyDedup {
 
         if (!file.exists()) {
             throw new FileNotFoundException("File not found: " + filePath);
+        }
+
+        // Check if the file path is already in fileRecipes
+        if (fileRecipes.containsKey(filePath)) {
+            System.out.println("The file has already been uploaded; skipping update.");
+            return; // Skip the upload
         }
 
         Set<String> fileListFingerprints = loadFileListFingerprints();
@@ -142,10 +145,11 @@ public class MyDedup {
         }
 
         // Check if the fileChunks are already in the file list
-        if (!haveUniqueChunk && fileChunks.stream().allMatch(fileListFingerprints::contains)) {
-            System.out.println("The file has already been uploaded; skipping update.");
-            return; // Skip the upload
-        }
+        // dropped
+//        if (!haveUniqueChunk && fileChunks.stream().allMatch(fileListFingerprints::contains)) {
+//            System.out.println("The file has already been uploaded; skipping update.");
+//            return; // Skip the upload
+//        }
 
         // If any chunk was unique, we need to check if any chunk was duplicated
         for (String fingerprint : fileChunks) {
@@ -164,7 +168,7 @@ public class MyDedup {
         totalFiles++;
 
         // Update the file list
-        updateFileList(fileChunks, filePath);
+        saveFileRecipes();
 
         // Print statistics
         printStatistics();
@@ -376,16 +380,40 @@ public class MyDedup {
             System.out.println("Statistics file does not exist: " + statsPath);
         }
     }
-    private static void updateFileList(List<String> fileChunks, String filePath) throws IOException {
+    private static void loadFileRecipes() throws IOException {
+        Path fileListPath = Paths.get("./data/file_list.index");
+
+        if (Files.exists(fileListPath)) {
+            try (BufferedReader reader = Files.newBufferedReader(fileListPath)) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    String[] parts = line.split(",", 2); // Split into two parts
+                    if (parts.length == 2) {
+                        String filePath = parts[0];
+                        List<String> fingerprints = Arrays.asList(parts[1].split(","));
+                        // Store the file path and associated fingerprints
+                        fileRecipes.put(filePath, fingerprints);
+                    }
+                }
+                System.out.println("File recipes loaded from: " + fileListPath);
+            }
+        } else {
+            System.out.println("File recipes file does not exist: " + fileListPath);
+        }
+    }
+
+    private static void saveFileRecipes() throws IOException {
         Path fileListPath = Paths.get("./data/file_list.index");
         Files.createDirectories(fileListPath.getParent()); // Ensure the directory exists
 
-        // Use a try-with-resources statement to ensure the writer is closed properly
-        try (BufferedWriter writer = Files.newBufferedWriter(fileListPath, StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
-            int fileId = totalFiles; // Use the current totalFiles count as the fileId
-            // Write the fileId followed by the fingerprints in order
-            String line = String.format("%d,%s,%s%n", fileId, filePath, String.join(",", fileChunks));
-            writer.write(line);
+        try (BufferedWriter writer = Files.newBufferedWriter(fileListPath)) {
+            for (Map.Entry<String, List<String>> entry : fileRecipes.entrySet()) {
+                String filePath = entry.getKey();
+                List<String> fingerprints = entry.getValue();
+                // Write the filePath followed by the fingerprints
+                String line = String.format("%s,%s%n", filePath, String.join(",", fingerprints));
+                writer.write(line);
+            }
         }
     }
 
