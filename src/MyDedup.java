@@ -181,11 +181,36 @@ public class MyDedup {
             throw new FileNotFoundException("File not found in metadata: " + filePath);
         }
 
-//         try (FileOutputStream fos = new FileOutputStream(filePath)) {
-//             for (String fingerprint : fileChunks) {
-// //                fos.write(fingerprintIndex.get(fingerprint));
-//             }
-//         }
+        ByteArrayOutputStream originalFileArray = new ByteArrayOutputStream();
+        
+        for (String fingerprint : fileChunks) {
+            FingerprintInfo info = fingerprintIndex.get(fingerprint);
+            if (info == null) {
+                throw new FileNotFoundException("Fingerprint not found in metadata: " + fingerprint);
+            }
+
+            int containerNumber = info.containerNumber;
+            int start = info.start;
+            int offset = info.offset;
+
+            FileInputStream containerInputStream = new FileInputStream(String.format("./data/container_%d.bin", containerNumber));
+            
+            containerInputStream.skip(start);
+            byte[] containerData = new byte[offset];
+            containerInputStream.read(containerData);
+            originalFileArray.write(containerData);
+            
+            containerInputStream.close();
+        }
+
+        if (!Files.exists(Paths.get(localFilePath))) {
+            Files.createDirectories(Paths.get(localFilePath).getParent());
+        }
+
+        Files.write(Paths.get(localFilePath), originalFileArray.toByteArray());
+        // FileOutputStream newFile = new FileOutputStream(localFilePath);
+        // originalFileArray.writeTo(newFile);
+        // newFile.close();
 
         System.out.println("File downloaded successfully: " + filePath);
     }
