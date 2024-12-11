@@ -3,10 +3,24 @@ import java.nio.file.*;
 import java.security.*;
 import java.util.*;
 
+class FingerprintInfo {
+    String fingerprint;
+    int containerNumber;
+    int start;
+    int offset;
+
+    public FingerprintInfo(String fingerprint, int containerNumber, int start, int offset) {
+        this.fingerprint = fingerprint;
+        this.containerNumber = containerNumber;
+        this.start = start;
+        this.offset = offset;
+    }
+}
+
 public class MyDedup {
 
     // Metadata and statistics
-    private static Map<String, Integer> fingerprintIndex = new HashMap<>();
+    private static Map<String, FingerprintInfo> fingerprintIndex = new HashMap<>();
     private static Map<String, List<String>> fileRecipes = new HashMap<>();
     private static int totalFiles = 0, totalChunks = 0, uniqueChunks = 0, totalContainers = 0;
     private static long totalBytes = 0, uniqueBytes = 0;
@@ -14,6 +28,11 @@ public class MyDedup {
     private static final int CONTAINER_SIZE = 1 * 1024 * 1024; // 1 MiB
 
     public static void main(String[] args) throws Exception {
+
+        if (args.length == 0) {
+            System.out.println("Usage: java MyDedup <upload/download><min_chunk> <avg_chunk> <max_chunk>  <file_path> ");
+            return;
+        }
 
         String operation = args[0];
 
@@ -70,6 +89,7 @@ public class MyDedup {
         List<String> fileChunks = new ArrayList<>();
         ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
 
+
         int start = 0;
         while (start < fileData.length) {
             int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
@@ -78,7 +98,8 @@ public class MyDedup {
 
             // Deduplication: Add only unique chunks
             if (!fingerprintIndex.containsKey(fingerprint)) {
-                fingerprintIndex.put(fingerprint, chunkSize); // Store only the fingerprint and chunk size
+                // Store the fingerprint along with container number, start, and offset
+                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, totalContainers, start, chunkSize));
                 uniqueChunks++;
                 uniqueBytes += chunk.length;
 
@@ -116,7 +137,7 @@ public class MyDedup {
 
         try (FileOutputStream fos = new FileOutputStream(filePath)) {
             for (String fingerprint : fileChunks) {
-                fos.write(fingerprintIndex.get(fingerprint));
+//                fos.write(fingerprintIndex.get(fingerprint));
             }
         }
 
@@ -196,23 +217,24 @@ public class MyDedup {
     private static void loadMetadata() throws IOException {
         Path metadataPath = Paths.get("./data/mydedup.index");
 
-        // Check if the metadata file exists before attempting to read
         if (Files.exists(metadataPath)) {
             try (BufferedReader reader = Files.newBufferedReader(metadataPath)) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     String[] parts = line.split(",");
-                    if (parts.length == 2) {
+                    if (parts.length == 4) {
                         String fingerprint = parts[0];
-                        int chunkSize = Integer.parseInt(parts[1]);
+                        int containerNumber = Integer.parseInt(parts[1]);
+                        int start = Integer.parseInt(parts[2]);
+                        int offset = Integer.parseInt(parts[3]);
 
-                        // Store only the fingerprint and its size
-                        fingerprintIndex.put(fingerprint, chunkSize);
+                        // Store the fingerprint info
+                        fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, containerNumber, start, offset));
                     }
                 }
                 System.out.println("Metadata file loaded from: " + metadataPath);
             } catch (NumberFormatException e) {
-                System.err.println("Error parsing chunk size from metadata: " + e.getMessage());
+                System.err.println("Error parsing metadata from file: " + e.getMessage());
             }
         } else {
             System.out.println("Metadata file does not exist: " + metadataPath);
@@ -225,7 +247,10 @@ public class MyDedup {
         Path dataDir = Paths.get("./data/");
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(dataDir, "container_*.bin")) {
             int maxContainerNum = 0;
+            boolean hasContainers = false; // Flag to check if any containers are found
+
             for (Path entry : stream) {
+                hasContainers = true; // At least one container file found
                 String fileName = entry.getFileName().toString();
                 // Extract the number from the filename
                 String numberPart = fileName.replace("container_", "").replace(".bin", "");
@@ -236,23 +261,22 @@ public class MyDedup {
                     System.err.println("Error parsing container number from file: " + fileName);
                 }
             }
-            totalContainers = maxContainerNum+1; // Update the total container count
+
+            // Update the total container count; if no containers were found, it remains 0
+            totalContainers = hasContainers ? maxContainerNum + 1 : 0;
         } catch (IOException e) {
             System.err.println("Error reading the data directory: " + e.getMessage());
+            totalContainers = 0; // Set to 0 in case of an error
         }
     }
 
     private static void saveMetadata() throws IOException {
-        // Define the file path for the metadata
         Path metadataPath = Paths.get("./data/mydedup.index");
         Files.createDirectories(metadataPath.getParent()); // Create directory if it doesn't exist
 
-        // Use a try-with-resources statement to ensure the writer is closed properly
         try (BufferedWriter writer = Files.newBufferedWriter(metadataPath)) {
-            for (Map.Entry<String, Integer> entry : fingerprintIndex.entrySet()) {
-                String fingerprint = entry.getKey();
-                int chunkSize = entry.getValue();
-                String metadataLine = String.format("%s,%d%n", fingerprint, chunkSize);
+            for (FingerprintInfo info : fingerprintIndex.values()) {
+                String metadataLine = String.format("%s,%d,%d,%d%n", info.fingerprint, info.containerNumber, info.start, info.offset);
                 writer.write(metadataLine);
             }
         }
