@@ -43,7 +43,6 @@ public class MyDedup {
 
         String operation = args[0];
 
-
         if (operation.equals("upload")) {
             String filePath = args[4];
             int minChunk = Integer.parseInt(args[1]);
@@ -68,16 +67,30 @@ public class MyDedup {
             if (args.length < 3) {
                 System.out.println("Usage: java MyDedup download <file_to_download> <local_file_name>");
                 return;
+            }
 
+            String filePath = args[1];
+            String localFilePath = args[2];
+            System.out.println("Filepath: " + filePath + "," + localFilePath);
+
+            // load the data from the index
+            loadMetadata();
+
+            download(filePath, localFilePath);
+
+        } else if (operation.equals("delete")) {
+            if (args.length < 2) {
+                System.out.println("Usage: java MyDedup delete <file_to_delete>");
+                return;
             }
 
             // load the data from the index
             loadMetadata();
 
-            // TODO: download
-
-        } else {
-            System.out.println("Invalid operation. Use 'upload' or 'download'.");
+            // delete(args[1]);
+        } 
+        else {
+            System.out.println("Invalid operation. Use 'upload' or 'download' or 'delete'.");
         }
 
         // Save metadata
@@ -155,17 +168,18 @@ public class MyDedup {
         printStatistics();
     }
 
-    private static void download(String filePath) throws Exception {
+    private static void download(String filePath, String localFilePath) throws Exception {
         List<String> fileChunks = fileRecipes.get(filePath);
+        System.out.println("File Chunks: " + fileChunks);
         if (fileChunks == null) {
             throw new FileNotFoundException("File not found in metadata: " + filePath);
         }
 
-        try (FileOutputStream fos = new FileOutputStream(filePath)) {
-            for (String fingerprint : fileChunks) {
-//                fos.write(fingerprintIndex.get(fingerprint));
-            }
-        }
+//         try (FileOutputStream fos = new FileOutputStream(filePath)) {
+//             for (String fingerprint : fileChunks) {
+// //                fos.write(fingerprintIndex.get(fingerprint));
+//             }
+//         }
 
         System.out.println("File downloaded successfully: " + filePath);
     }
