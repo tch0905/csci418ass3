@@ -140,17 +140,23 @@ public class MyDedup {
         List<String> fileChunks = new ArrayList<>();
         ByteArrayOutputStream containerBuffer = new ByteArrayOutputStream();
 
-        while (start < fileData.length) {
-            // System.out.println("Anchor: " + start);
-            int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
-            byte[] chunk = Arrays.copyOfRange(fileData, start, start + chunkSize);
-            String fingerprint = getMD5(chunk);
+        int[] anchorPoints = findAllChunk(fileData, minChunk, avgChunk, maxChunk);
+        // System.out.println("All Anchor points: ");
+        // for (int anchor : anchorPoints) {
+        //     System.out.println(anchor);
+        // }
 
+        for (int i = 1; i < anchorPoints.length; i++) {
+            int startPosition = anchorPoints[i - 1];
+            int endPosition = anchorPoints[i];
+            byte[] chunk = Arrays.copyOfRange(fileData, startPosition, endPosition);
+            String fingerprint = getMD5(chunk);
+            
             // Deduplication: Add only unique chunks
             if (!fingerprintIndex.containsKey(fingerprint)) {
                 haveUniqueChunk = true;
                 // Store the fingerprint along with container number, start, and offset
-                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, containerNumber, containerBuffer.size(), chunkSize));
+                fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, containerNumber, containerBuffer.size(), endPosition-startPosition));
                 uniqueChunks++;
                 uniqueBytes += chunk.length;
                 containerBuffer.write(chunk);
@@ -162,12 +168,41 @@ public class MyDedup {
                 containerNumber++;
             }
 
-
             fileChunks.add(fingerprint);
             totalChunks++;
             totalBytes += chunk.length;
-            start += chunkSize;
         }
+
+        // while (start < fileData.length) {
+        //     // System.out.println("Anchor: " + start);
+        //     int chunkSize = findNextChunk(fileData, start, minChunk, avgChunk, maxChunk);
+        //     byte[] chunk = Arrays.copyOfRange(fileData, start, start + chunkSize);
+        //     String fingerprint = getMD5(chunk);
+
+        //     // Deduplication: Add only unique chunks
+        //     if (!fingerprintIndex.containsKey(fingerprint)) {
+        //         haveUniqueChunk = true;
+        //         // Store the fingerprint along with container number, start, and offset
+        //         fingerprintIndex.put(fingerprint, new FingerprintInfo(fingerprint, containerNumber, containerBuffer.size(), chunkSize));
+        //         uniqueChunks++;
+        //         uniqueBytes += chunk.length;
+        //         containerBuffer.write(chunk);
+        //     }
+
+        //     // Add to container
+        //     if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
+        //         flushContainer(containerBuffer, containerNumber);
+        //         containerNumber++;
+        //     }
+
+
+        //     fileChunks.add(fingerprint);
+        //     totalChunks++;
+        //     totalBytes += chunk.length;
+        //     start += chunkSize;
+        // }
+
+
 
         // Check if the fileChunks are already in the file list
         // dropped
@@ -302,7 +337,7 @@ public class MyDedup {
 
     private static int findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk) {
 
-        int end =  Math.min(start + minChunk, data.length);; // Limit the chunk size to `maxChunk`
+        int end =  Math.min(start + minChunk, data.length); // Limit the chunk size to `maxChunk`
         int anchorMask = avgChunk - 1; // Anchor point mask
 
         int d = 257; // Multiplier for Rabin fingerprint
@@ -318,15 +353,15 @@ public class MyDedup {
             if (s == start){
                 int sum = 0;
                 for (int i = 0; i < m; i++){
-                    sum += data[s+i] * (int) Math.pow(d,m-i-1);
+                    sum += data[s+i] * (int) power(d,m-i-1, q);
                 }
                 p = sum % q;
 
             } else {
-                p = Math.floorMod(d * (p - (int) Math.pow(d, m  - 1) * data[s])+ data[s+m], q);
+                p = Math.floorMod(d * (p - (int) power(d, m - 1, q) * data[s])+ data[s+m], q);
             }
 
-            if ((p & anchorMask) == anchorMask) {
+            if ((p & anchorMask) == 0) {
                 end = s + m;
                 break;
             }
@@ -334,6 +369,99 @@ public class MyDedup {
 
 
         return end - start;
+    }
+
+    private static int[] findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk, int rollinghash) {
+
+        int end =  Math.min(start + minChunk, data.length); // Limit the chunk size to `maxChunk`
+        int anchorMask = avgChunk - 1; // Anchor point mask
+
+        int d = 257; // Multiplier for Rabin fingerprint
+        int q = avgChunk; // A large prime modulus to avoid overflow
+        int m = minChunk;
+        int p = rollinghash;
+        for (int s = start; s - start < maxChunk; s++) {
+
+            if (s+m > data.length-1){
+                break;
+            }
+
+            if (s == 0){
+                int sum = 0;
+                for (int i = 0; i < m; i++){
+                    sum += data[s+i] * (int) power(d,m-i-1, q);
+                }
+                p = sum % q;
+
+            } else {
+                p = Math.floorMod(d * (p - (int) power(d, m - 1, q) * data[s])+ data[s+m], q);
+            }
+
+            if ((p & anchorMask) == 0) {
+                end = Math.min(s + m, data.length);
+                break;
+            }
+            // if (p == 0) {
+            //     end = Math.min(s + m, data.length);
+            //     break;
+            // }
+        }
+        rollinghash = p;
+
+        return new int[]{end - start, p};
+    }
+
+    private static int[] findAllChunk(byte[] data, int minChunk, int avgChunk, int maxChunk) {
+        // int end =  Math.min(minChunk, data.length); // Limit the chunk size to `maxChunk`
+        int anchorMask = avgChunk - 1; // Anchor point mask
+
+        int d = 257; // Multiplier for Rabin fingerprint
+        int q = avgChunk; // A large prime modulus to avoid overflow
+        int m = minChunk;
+        // int p = 0;
+
+        int prevAnchor = -m;
+        long helper_base = power(d, m-1, q);
+
+        int[] fingerprints = new int[data.length - m + 1];
+        List<Integer> anchors = new ArrayList<Integer>(); 
+        anchors.add(0);
+
+        for (int s = 0; s < data.length - m; s++) {
+            int p = 0;
+            if (s == 0) {
+                for (int i = 0; i < m; i++) {
+                    p = (p % q + (int)power(d, m-i-1, q) * data[i] % q) % q;
+                }
+            }
+            else {
+                p = ((d * (fingerprints[s-1] - (int) helper_base * data[s-1])) % q + data[s+m-1] % q) % q;
+            }
+            if (p < 0) {
+                p = p + q;
+            }
+
+            fingerprints[s] = p;
+
+            if ((p & anchorMask) == 0 || s - prevAnchor == maxChunk) { // determine the chunk boundaries
+                if (s - prevAnchor >= m ) {
+                    prevAnchor = s;
+                    anchors.add(s + m);
+                }
+            }
+        }
+        anchors.add(data.length); // add the last anchor
+
+        // System.out.println("All Anchor points: ");
+        // for (int anchor : anchors) {
+        //     System.out.println(anchor);
+        // }
+        int[] result = new int[anchors.size()];
+        for (int i = 0; i < anchors.size(); i++) {
+            result[i] = anchors.get(i);
+        }
+
+        return result;
     }
 
 
@@ -366,7 +494,7 @@ public class MyDedup {
             containerBuffer.writeTo(outputStream);
         }
 
-        System.out.println("Saved container: " + filename);
+        // System.out.println("Saved container: " + filename);
     }
     private static boolean isPowerOfTwo(int n) {
         return (n > 0) && ((n & (n - 1)) == 0);
@@ -429,7 +557,7 @@ public class MyDedup {
                 System.err.println("Error parsing metadata from file: " + e.getMessage());
             }
         } else {
-            System.out.println("Metadata file does not exist: " + metadataPath);
+            // System.out.println("Metadata file does not exist: " + metadataPath);
         }
 
         // Update totalContainers by scanning the ./data/ directory
@@ -547,6 +675,14 @@ public class MyDedup {
                 writer.write(line);
             }
         }
+    }
+
+    private static long power(int base, int exp, int q) {
+        long result = 1;
+        for (int i = 0; i < exp; i++) {
+            result = result * base;
+        }
+        return result;
     }
 
 

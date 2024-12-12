@@ -1,0 +1,8 @@
+Report Output:
+Total number of files that have been stored: 2
+Total number of pre-deduplicated chunks in storage: 21897
+Total number of unique chunks in storage: 14632
+Total number of bytes of pre-deduplicated chunks in storage: 7410684
+Total number of bytes of unique chunks in storage: 4949043
+Total number of containers in storage: 6
+Deduplication ratio: 1.50
