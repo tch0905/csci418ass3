@@ -552,12 +552,13 @@ public class MyDedup {
 
     private static void printStatistics() {
         double deduplicationRatio = totalBytes / (double) uniqueBytes;
-        System.out.printf("Total files: %d\n", totalFiles);
-        System.out.printf("Total pre-deduplicated chunks: %d\n", totalChunks);
-        System.out.printf("Total unique chunks: %d\n", uniqueChunks);
-        System.out.printf("Total bytes (pre-deduplicated): %d\n", totalBytes);
-        System.out.printf("Total bytes (unique): %d\n", uniqueBytes);
-        System.out.printf("Total containers: %d\n", totalContainers);
+        System.out.printf("Report Output:\n");
+        System.out.printf("Total number of files that have been stored: %d\n", totalFiles);
+        System.out.printf("Total number of pre-deduplicated chunks in storage: %d\n", totalChunks);
+        System.out.printf("Total number of unique chunks in storage: %d\n", uniqueChunks);
+        System.out.printf("Total number of bytes of pre-deduplicated chunks in storage: %d\n", totalBytes);
+        System.out.printf("Total number of bytes of unique chunks in storage: %d\n", uniqueBytes);
+        System.out.printf("Total number of containers in storage: %d\n", totalContainers);
         System.out.printf("Deduplication ratio: %.2f\n", deduplicationRatio);
     }
 }
