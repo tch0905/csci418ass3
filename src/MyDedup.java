@@ -56,6 +56,12 @@ public class MyDedup {
         loadFileRecipes();
 
         if (operation.equals("upload")) {
+            
+            if (args.length < 5 || args.length > 5) {
+                System.out.println("Usage: java MyDedup <upload/download> <min_chunk> <avg_chunk> <max_chunk> <file_path> ");
+                return;
+            }
+
             String filePath = args[4];
             int minChunk = Integer.parseInt(args[1]);
             int avgChunk = Integer.parseInt(args[2]);
@@ -67,15 +73,11 @@ public class MyDedup {
             }
 
 
-            if (args.length < 5) {
-                System.out.println("Usage: java MyDedup <upload/download> <min_chunk> <avg_chunk> <max_chunk> <file_path> ");
-                return;
-            }
-
-
             upload(filePath, minChunk, avgChunk, maxChunk);
+
         } else if (operation.equals("download")) {
-            if (args.length < 3) {
+
+            if (args.length < 3 || args.length > 3) {
                 System.out.println("Usage: java MyDedup download <file_to_download> <local_file_name>");
                 return;
             }
@@ -88,7 +90,8 @@ public class MyDedup {
             download(filePath, localFilePath);
 
         } else if (operation.equals("delete")) {
-            if (args.length < 2) {
+            
+            if (args.length < 2 || args.length > 2) {
                 System.out.println("Usage: java MyDedup delete <file_to_delete>");
                 return;
             }
@@ -265,7 +268,7 @@ public class MyDedup {
 
     private static void delete(String filePath) throws Exception {
         List<String> fileChunks = fileRecipes.get(filePath);
-        System.out.println("File Chunks: " + fileChunks);
+        // System.out.println("File Chunks: " + fileChunks);
 
         if (fileChunks == null) {
             throw new FileNotFoundException("File not found in metadata: " + filePath);
@@ -324,81 +327,81 @@ public class MyDedup {
         System.out.println("Successfully deleted file: " + filePath);
     }
 
-    private static int findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk) {
+    // private static int findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk) {
 
-        int end =  Math.min(start + minChunk, data.length); // Limit the chunk size to `maxChunk`
-        int anchorMask = avgChunk - 1; // Anchor point mask
+    //     int end =  Math.min(start + minChunk, data.length); // Limit the chunk size to `maxChunk`
+    //     int anchorMask = avgChunk - 1; // Anchor point mask
 
-        int d = 257; // Multiplier for Rabin fingerprint
-        int q = avgChunk; // A large prime modulus to avoid overflow
-        int m = minChunk;
-        int p = 0;
-        for (int s = start; s - start < maxChunk; s++) {
+    //     int d = 257; // Multiplier for Rabin fingerprint
+    //     int q = avgChunk; // A large prime modulus to avoid overflow
+    //     int m = minChunk;
+    //     int p = 0;
+    //     for (int s = start; s - start < maxChunk; s++) {
 
-            if (s+m > data.length-1){
-                break;
-            }
+    //         if (s+m > data.length-1){
+    //             break;
+    //         }
 
-            if (s == start){
-                int sum = 0;
-                for (int i = 0; i < m; i++){
-                    sum += data[s+i] * (int) power(d,m-i-1, q);
-                }
-                p = sum % q;
+    //         if (s == start){
+    //             int sum = 0;
+    //             for (int i = 0; i < m; i++){
+    //                 sum += data[s+i] * (int) power(d,m-i-1, q);
+    //             }
+    //             p = sum % q;
 
-            } else {
-                p = Math.floorMod(d * (p - (int) power(d, m - 1, q) * data[s])+ data[s+m], q);
-            }
+    //         } else {
+    //             p = Math.floorMod(d * (p - (int) power(d, m - 1, q) * data[s])+ data[s+m], q);
+    //         }
 
-            if ((p & anchorMask) == 0) {
-                end = s + m;
-                break;
-            }
-        }
+    //         if ((p & anchorMask) == 0) {
+    //             end = s + m;
+    //             break;
+    //         }
+    //     }
 
 
-        return end - start;
-    }
+    //     return end - start;
+    // }
 
-    private static int[] findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk, int rollinghash) {
+    // private static int[] findNextChunk(byte[] data, int start, int minChunk, int avgChunk, int maxChunk, int rollinghash) {
 
-        int end =  Math.min(start + minChunk, data.length); // Limit the chunk size to `maxChunk`
-        int anchorMask = avgChunk - 1; // Anchor point mask
+    //     int end =  Math.min(start + minChunk, data.length); // Limit the chunk size to `maxChunk`
+    //     int anchorMask = avgChunk - 1; // Anchor point mask
 
-        int d = 257; // Multiplier for Rabin fingerprint
-        int q = avgChunk; // A large prime modulus to avoid overflow
-        int m = minChunk;
-        int p = rollinghash;
-        for (int s = start; s - start < maxChunk; s++) {
+    //     int d = 257; // Multiplier for Rabin fingerprint
+    //     int q = avgChunk; // A large prime modulus to avoid overflow
+    //     int m = minChunk;
+    //     int p = rollinghash;
+    //     for (int s = start; s - start < maxChunk; s++) {
 
-            if (s+m > data.length-1){
-                break;
-            }
+    //         if (s+m > data.length-1){
+    //             break;
+    //         }
 
-            if (s == 0){
-                int sum = 0;
-                for (int i = 0; i < m; i++){
-                    sum += data[s+i] * (int) power(d,m-i-1, q);
-                }
-                p = sum % q;
+    //         if (s == 0){
+    //             int sum = 0;
+    //             for (int i = 0; i < m; i++){
+    //                 sum += data[s+i] * (int) power(d,m-i-1, q);
+    //             }
+    //             p = sum % q;
 
-            } else {
-                p = Math.floorMod(d * (p - (int) power(d, m - 1, q) * data[s])+ data[s+m], q);
-            }
+    //         } else {
+    //             p = Math.floorMod(d * (p - (int) power(d, m - 1, q) * data[s])+ data[s+m], q);
+    //         }
 
-            if ((p & anchorMask) == 0) {
-                end = Math.min(s + m, data.length);
-                break;
-            }
-            // if (p == 0) {
-            //     end = Math.min(s + m, data.length);
-            //     break;
-            // }
-        }
-        rollinghash = p;
+    //         if ((p & anchorMask) == 0) {
+    //             end = Math.min(s + m, data.length);
+    //             break;
+    //         }
+    //         // if (p == 0) {
+    //         //     end = Math.min(s + m, data.length);
+    //         //     break;
+    //         // }
+    //     }
+    //     rollinghash = p;
 
-        return new int[]{end - start, p};
-    }
+    //     return new int[]{end - start, p};
+    // }
 
     private static int[] findAllChunk(byte[] data, int minChunk, int avgChunk, int maxChunk) {
         // int end =  Math.min(minChunk, data.length); // Limit the chunk size to `maxChunk`
@@ -410,7 +413,7 @@ public class MyDedup {
         // int p = 0;
 
         int prevAnchor = -m;
-        long helper_base = power(d, m-1, q);
+        long helper_base = power(d, m-1); // precomputed helper base
 
         int[] fingerprints = new int[data.length - m + 1];
         List<Integer> anchors = new ArrayList<Integer>(); 
@@ -420,17 +423,17 @@ public class MyDedup {
             int p = 0;
             if (s == 0) {
                 for (int i = 0; i < m; i++) {
-                    p = (p % q + (int)power(d, m-i-1, q) * data[i] % q) % q;
+                    p = (p % q + (int)power(d, m-i-1) * data[i] % q) % q;
                 }
             }
             else {
                 p = ((d * (fingerprints[s-1] - (int) helper_base * data[s-1])) % q + data[s+m-1] % q) % q;
             }
             if (p < 0) {
-                p = p + q;
+                p = p + q; // make sure the fingerprint is non-negative
             }
 
-            fingerprints[s] = p;
+            fingerprints[s] = p; // store the fingerprint
 
             if ((p & anchorMask) == 0 || s - prevAnchor == maxChunk) { // determine the chunk boundaries
                 if (s - prevAnchor >= m ) {
@@ -439,7 +442,7 @@ public class MyDedup {
                 }
             }
         }
-        anchors.add(data.length); // add the last anchor
+        anchors.add(data.length); // add the last anchor to make the last chunk
 
         // System.out.println("All Anchor points: ");
         // for (int anchor : anchors) {
@@ -666,7 +669,7 @@ public class MyDedup {
         }
     }
 
-    private static long power(int base, int exp, int q) {
+    private static long power(int base, int exp) {
         long result = 1;
         for (int i = 0; i < exp; i++) {
             result = result * base;
