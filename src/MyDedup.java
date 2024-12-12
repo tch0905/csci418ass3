@@ -122,18 +122,7 @@ public class MyDedup {
 
         byte[] fileData = Files.readAllBytes(file.toPath());
 
-        Integer containerNumber = null;
-
-        // Use an empty container if available
-        if (!emptyContainers.isEmpty()) {
-            containerNumber = emptyContainers.iterator().next(); // Get an empty container number
-            emptyContainers.remove(containerNumber); // Remove it from the set of empty containers
-        } else {
-            // Create a new container number based on the total count
-            containerNumber = totalContainers;
-        }
-
-
+        Integer containerNumber = fetchNextContainer();
 
         int start = 0;
         boolean haveUniqueChunk = false;
@@ -165,7 +154,7 @@ public class MyDedup {
             // Add to container
             if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
                 flushContainer(containerBuffer, containerNumber);
-                containerNumber++;
+                containerNumber = fetchNextContainer();
             }
 
             fileChunks.add(fingerprint);
@@ -684,6 +673,20 @@ public class MyDedup {
         }
         return result;
     }
+
+    private static Integer fetchNextContainer() {
+
+        Integer containerNumber = totalContainers;
+        // Use an empty container if available
+        if (!emptyContainers.isEmpty()) {
+            containerNumber = emptyContainers.iterator().next(); // Get an empty container number
+            emptyContainers.remove(containerNumber); // Remove it from the set of empty containers
+        }
+
+        return containerNumber;
+
+    }
+
 
 
     private static void printStatistics() {
