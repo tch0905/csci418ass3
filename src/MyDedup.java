@@ -159,6 +159,7 @@ public class MyDedup {
             // Add to container
             if (containerBuffer.size() + chunk.length > CONTAINER_SIZE) {
                 flushContainer(containerBuffer, containerNumber);
+                containerNumber++;
             }
 
 
